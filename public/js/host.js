@@ -1,228 +1,186 @@
-// Host / Broadcaster WebRTC and UI Controller
+// Host / Broadcaster - Canvas Frame Streaming via Socket.IO
 (function () {
-  const socket = io(window.location.origin, {
-    transports: ['websocket', 'polling']
-  });
+  const socket = io(window.location.origin, { transports: ['websocket', 'polling'] });
   const urlParams = new URLSearchParams(window.location.search);
   const roomId = urlParams.get('room') || 'default';
 
   // DOM Elements
   const toggleStreamBtn = document.getElementById('toggleStreamBtn');
-  const toggleBtnText = document.getElementById('toggleBtnText');
-  const playIcon = toggleStreamBtn.querySelector('.play-icon');
-  const stopIcon = toggleStreamBtn.querySelector('.stop-icon');
-  const statusBadge = document.getElementById('connectionStatusBadge');
-  const statusText = document.getElementById('statusText');
-  const previewContainer = document.getElementById('previewContainer');
-  const previewEmpty = document.getElementById('previewEmpty');
-  const videoWrapper = document.getElementById('videoWrapper');
+  const toggleBtnText   = document.getElementById('toggleBtnText');
+  const playIcon        = toggleStreamBtn.querySelector('.play-icon');
+  const stopIcon        = toggleStreamBtn.querySelector('.stop-icon');
+  const statusBadge     = document.getElementById('connectionStatusBadge');
+  const statusText      = document.getElementById('statusText');
+  const previewEmpty    = document.getElementById('previewEmpty');
+  const videoWrapper    = document.getElementById('videoWrapper');
   const hostPreviewVideo = document.getElementById('hostPreviewVideo');
-  const laserCanvas = document.getElementById('laserCanvas');
-  const qrImage = document.getElementById('qrImage');
-  const qrLoading = document.getElementById('qrLoading');
-  const viewerUrlInput = document.getElementById('viewerUrlInput');
-  const copyUrlBtn = document.getElementById('copyUrlBtn');
+  const qrImage         = document.getElementById('qrImage');
+  const qrLoading       = document.getElementById('qrLoading');
+  const viewerUrlInput  = document.getElementById('viewerUrlInput');
+  const copyUrlBtn      = document.getElementById('copyUrlBtn');
   const openViewerTabBtn = document.getElementById('openViewerTabBtn');
   const shareAudioToggle = document.getElementById('shareAudioToggle');
   const networkSelectGroup = document.getElementById('networkSelectGroup');
   const networkIpSelect = document.getElementById('networkIpSelect');
-  const viewersList = document.getElementById('viewersList');
+  const viewersList     = document.getElementById('viewersList');
   const viewerCountPill = document.getElementById('viewerCountPill');
-  const emptyViewersMsg = document.getElementById('emptyViewersMsg');
-  const statResolution = document.getElementById('statResolution');
-  const statFps = document.getElementById('statFps');
-  const toastContainer = document.getElementById('toastContainer');
-  const qualityButtons = document.querySelectorAll('.quality-card');
+  const statResolution  = document.getElementById('statResolution');
+  const statFps         = document.getElementById('statFps');
+  const toastContainer  = document.getElementById('toastContainer');
+  const qualityButtons  = document.querySelectorAll('.quality-card');
 
   // State
-  let localStream = null;
-  let isStreaming = false;
-  let selectedQuality = '1080p60';
-  const peerConnections = new Map(); // viewerId -> RTCPeerConnection
-  const iceCandidateQueues = new Map(); // viewerId -> [candidate]
-  const connectedViewers = new Map(); // viewerId -> info
+  let localStream       = null;
+  let isStreaming       = false;
+  let selectedQuality   = '720p';
+  let captureInterval   = null;
+  let frameCount        = 0;
+  let lastFpsTime       = Date.now();
+  const connectedViewers = new Map();
 
-  // Multi-STUN & Open TURN Server configuration for 100% reliable WebRTC across all networks
-  const rtcConfig = {
-    iceServers: [
-      { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'stun:stun1.l.google.com:19302' },
-      { urls: 'stun:stun2.l.google.com:19302' },
-      { urls: 'stun:stun3.l.google.com:19302' },
-      { urls: 'stun:stun.cloudflare.com:3478' },
-      { urls: 'stun:global.stun.twilio.com:3478' },
-      {
-        urls: 'turn:openrelay.metered.ca:80',
-        username: 'openrelayproject',
-        credential: 'openrelayproject'
-      },
-      {
-        urls: 'turn:openrelay.metered.ca:443',
-        username: 'openrelayproject',
-        credential: 'openrelayproject'
-      }
-    ],
-    iceCandidatePoolSize: 10
-  };
+  // Hidden video + canvas for frame capture
+  const captureVideo  = document.createElement('video');
+  const captureCanvas = document.createElement('canvas');
+  const captureCtx    = captureCanvas.getContext('2d');
+  captureVideo.muted  = true;
+  captureVideo.playsInline = true;
 
   // Quality Profiles
   const qualityProfiles = {
-    '1080p60': { width: 1920, height: 1080, frameRate: 60 },
-    '4k': { width: 3840, height: 2160, frameRate: 30 },
-    '720p60': { width: 1280, height: 720, frameRate: 60 },
-    'low': { width: 1280, height: 720, frameRate: 30 }
+    '1080p60': { width: 1280, height: 720, fps: 20, jpegQ: 0.75, label: '720p / 20fps' },
+    '4k'     : { width: 1920, height: 1080, fps: 15, jpegQ: 0.70, label: '1080p / 15fps' },
+    '720p60' : { width: 1280, height: 720,  fps: 25, jpegQ: 0.75, label: '720p / 25fps' },
+    'low'    : { width: 854,  height: 480,  fps: 15, jpegQ: 0.60, label: '480p / 15fps' }
   };
 
-  // Show Toast
-  function showToast(message) {
-    const toast = document.createElement('div');
-    toast.className = 'toast';
-    toast.textContent = message;
-    toastContainer.appendChild(toast);
-    setTimeout(() => {
-      toast.style.opacity = '0';
-      toast.style.transform = 'translateY(10px)';
-      toast.style.transition = 'all 0.3s ease';
-      setTimeout(() => toast.remove(), 300);
-    }, 3000);
+  // ── Toast ─────────────────────────────────────────────────────────────────
+  function showToast(msg) {
+    const t = document.createElement('div');
+    t.className = 'toast';
+    t.textContent = msg;
+    toastContainer.appendChild(t);
+    setTimeout(() => { t.style.opacity = '0'; t.style.transform = 'translateY(10px)'; t.style.transition = 'all .3s'; setTimeout(() => t.remove(), 300); }, 3000);
   }
 
-  // Load Network & QR Info
+  // ── Network / QR Info ─────────────────────────────────────────────────────
   async function loadNetworkInfo() {
     try {
-      const res = await fetch('/api/info');
-      const data = await res.json();
-
-      let targetViewerUrl = data.viewerUrl;
-      if (roomId && roomId !== 'default') {
-        targetViewerUrl += (targetViewerUrl.includes('?') ? '&' : '?') + `room=${encodeURIComponent(roomId)}`;
-      }
-
-      viewerUrlInput.value = targetViewerUrl;
-      openViewerTabBtn.href = targetViewerUrl;
+      const data = await fetch('/api/info').then(r => r.json());
+      let url = data.viewerUrl;
+      if (roomId !== 'default') url += `?room=${encodeURIComponent(roomId)}`;
+      viewerUrlInput.value = url;
+      openViewerTabBtn.href = url;
       qrImage.src = data.qrDataUrl;
       qrLoading.style.display = 'none';
       qrImage.style.display = 'block';
-
-      if (data.allIps && data.allIps.length > 1) {
-        networkSelectGroup.style.display = 'block';
-        networkIpSelect.innerHTML = data.allIps.map(item => {
-          let u = item.url;
-          if (roomId && roomId !== 'default') u += `?room=${encodeURIComponent(roomId)}`;
-          return `<option value="${u}">${item.interface} (${item.ip})</option>`;
-        }).join('');
-
-        networkIpSelect.addEventListener('change', (e) => {
-          viewerUrlInput.value = e.target.value;
-          openViewerTabBtn.href = e.target.value;
-        });
-      }
-    } catch (err) {
-      console.error('Failed to load network info', err);
-      viewerUrlInput.value = window.location.origin + '/viewer' + (roomId !== 'default' ? `?room=${encodeURIComponent(roomId)}` : '');
+    } catch {
+      viewerUrlInput.value = window.location.origin + '/viewer';
     }
   }
 
-  // Copy Viewer URL
+  // ── Copy URL ──────────────────────────────────────────────────────────────
   copyUrlBtn.addEventListener('click', () => {
-    navigator.clipboard.writeText(viewerUrlInput.value).then(() => {
-      showToast('📋 Link copied to clipboard!');
-    }).catch(() => {
-      viewerUrlInput.select();
-      document.execCommand('copy');
-      showToast('📋 Link copied!');
-    });
+    navigator.clipboard.writeText(viewerUrlInput.value).then(() => showToast('📋 Link copied!')).catch(() => { viewerUrlInput.select(); document.execCommand('copy'); showToast('📋 Link copied!'); });
   });
 
-  // Quality Selection
+  // ── Quality Cards ─────────────────────────────────────────────────────────
   qualityButtons.forEach(btn => {
     btn.addEventListener('click', () => {
       qualityButtons.forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       selectedQuality = btn.dataset.quality;
-
-      if (isStreaming) {
-        showToast('⚙️ Quality will apply to next screen capture');
-      }
+      if (isStreaming) showToast('⚙️ Quality changes on next start');
     });
   });
 
-  // Start Screen Capture
+  // ── Start Frame Streaming ─────────────────────────────────────────────────
   async function startScreenMirroring() {
     try {
-      const profile = qualityProfiles[selectedQuality] || qualityProfiles['1080p60'];
+      const profile = qualityProfiles[selectedQuality] || qualityProfiles['720p60'];
       const captureAudio = shareAudioToggle.checked;
 
-      const constraints = {
-        video: {
-          cursor: 'always',
-          displaySurface: 'monitor',
-          width: { ideal: profile.width, max: profile.width },
-          height: { ideal: profile.height, max: profile.height },
-          frameRate: { ideal: profile.frameRate, max: 60 }
-        },
-        audio: captureAudio ? {
-          echoCancellation: false,
-          noiseSuppression: false,
-          autoGainControl: false,
-          sampleRate: 48000
-        } : false
-      };
+      localStream = await navigator.mediaDevices.getDisplayMedia({
+        video: { cursor: 'always', width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } },
+        audio: captureAudio ? { echoCancellation: false, noiseSuppression: false, autoGainControl: false } : false
+      });
 
-      localStream = await navigator.mediaDevices.getDisplayMedia(constraints);
-      
-      // Update UI
+      // Show preview
+      hostPreviewVideo.srcObject = localStream;
+      previewEmpty.style.display = 'none';
+      videoWrapper.style.display = 'block';
       isStreaming = true;
+
+      // UI
       toggleBtnText.textContent = 'Stop Screen Mirroring';
       toggleStreamBtn.classList.add('streaming');
       playIcon.style.display = 'none';
       stopIcon.style.display = 'inline-block';
       statusBadge.className = 'status-badge status-live';
-      statusText.textContent = 'Live Streaming 60 FPS';
+      statusText.textContent = 'Live Streaming';
 
-      previewEmpty.style.display = 'none';
-      videoWrapper.style.display = 'block';
-      hostPreviewVideo.srcObject = localStream;
+      // Setup capture
+      captureVideo.srcObject = localStream;
+      captureVideo.play();
 
-      // Read stream track info
-      const videoTrack = localStream.getVideoTracks()[0];
-      const settings = videoTrack.getSettings();
-      statResolution.textContent = `${settings.width || profile.width}x${settings.height || profile.height}`;
-      statFps.textContent = `${settings.frameRate || profile.frameRate} FPS`;
-
-      // Handle user stopping share via browser native banner
-      videoTrack.onended = () => {
-        stopScreenMirroring();
-      };
-
-      // Notify viewers stream is live
       socket.emit('stream-state', { isStreaming: true });
 
-      // Connect any waiting viewers
-      connectedViewers.forEach((_, viewerId) => {
-        createPeerConnectionForViewer(viewerId);
-      });
+      // Start frame capture loop
+      startFrameCapture(profile);
 
+      localStream.getVideoTracks()[0].onended = stopScreenMirroring;
       showToast('🚀 Screen Mirroring Started!');
     } catch (err) {
-      console.error('Error starting screen capture:', err);
-      if (err.name !== 'NotAllowedError') {
-        alert('Could not start screen capture: ' + err.message);
-      }
+      console.error('[Host] Start failed:', err);
+      if (err.name !== 'NotAllowedError') alert('Could not start screen capture: ' + err.message);
     }
   }
 
-  // Stop Screen Capture
+  // ── Frame Capture Loop ────────────────────────────────────────────────────
+  function startFrameCapture(profile) {
+    if (captureInterval) clearInterval(captureInterval);
+
+    const interval = Math.round(1000 / profile.fps);
+    const maxW = profile.width;
+    const maxH = profile.height;
+    const quality = profile.jpegQ;
+
+    captureInterval = setInterval(() => {
+      if (!captureVideo.videoWidth || !isStreaming) return;
+
+      // Scale down to target resolution
+      let w = captureVideo.videoWidth;
+      let h = captureVideo.videoHeight;
+      const ratio = Math.min(maxW / w, maxH / h, 1);
+      w = Math.round(w * ratio);
+      h = Math.round(h * ratio);
+
+      captureCanvas.width  = w;
+      captureCanvas.height = h;
+      captureCtx.drawImage(captureVideo, 0, 0, w, h);
+
+      captureCanvas.toBlob(blob => {
+        if (!blob || !socket.connected || connectedViewers.size === 0) return;
+        blob.arrayBuffer().then(buf => socket.emit('video-frame', buf));
+      }, 'image/jpeg', quality);
+
+      // FPS counter
+      frameCount++;
+      const now = Date.now();
+      if (now - lastFpsTime >= 1000) {
+        statFps.textContent = `${frameCount} FPS`;
+        statResolution.textContent = `${w}x${h}`;
+        frameCount = 0;
+        lastFpsTime = now;
+      }
+    }, interval);
+  }
+
+  // ── Stop ──────────────────────────────────────────────────────────────────
   function stopScreenMirroring() {
-    if (localStream) {
-      localStream.getTracks().forEach(track => track.stop());
-      localStream = null;
-    }
+    if (captureInterval) { clearInterval(captureInterval); captureInterval = null; }
+    if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
 
-    // Close all viewer peer connections
-    peerConnections.forEach((pc) => pc.close());
-    peerConnections.clear();
-
+    captureVideo.srcObject = null;
     isStreaming = false;
     toggleBtnText.textContent = 'Start Screen Mirroring';
     toggleStreamBtn.classList.remove('streaming');
@@ -230,227 +188,60 @@
     stopIcon.style.display = 'none';
     statusBadge.className = 'status-badge status-idle';
     statusText.textContent = 'Ready to Cast';
-
     hostPreviewVideo.srcObject = null;
     videoWrapper.style.display = 'none';
     previewEmpty.style.display = 'flex';
     statResolution.textContent = '--';
     statFps.textContent = '-- FPS';
-
     socket.emit('stream-state', { isStreaming: false });
     showToast('⏹️ Screen Mirroring Stopped');
   }
 
-  // Toggle Stream Button
-  toggleStreamBtn.addEventListener('click', () => {
-    if (isStreaming) {
-      stopScreenMirroring();
-    } else {
-      startScreenMirroring();
-    }
-  });
+  toggleStreamBtn.addEventListener('click', () => isStreaming ? stopScreenMirroring() : startScreenMirroring());
 
-  // WebRTC: Create Peer Connection for a Viewer
-  async function createPeerConnectionForViewer(viewerId) {
-    if (!localStream) return;
-
-    if (peerConnections.has(viewerId)) {
-      try {
-        peerConnections.get(viewerId).close();
-      } catch (e) {}
-      peerConnections.delete(viewerId);
-    }
-    iceCandidateQueues.set(viewerId, []);
-
-    const pc = new RTCPeerConnection(rtcConfig);
-    peerConnections.set(viewerId, pc);
-
-    // Add all local audio & video tracks to PeerConnection
-    localStream.getTracks().forEach(track => {
-      pc.addTrack(track, localStream);
-    });
-
-    // Send ICE candidates to viewer
-    pc.onicecandidate = (event) => {
-      if (event.candidate) {
-        socket.emit('ice-candidate', {
-          target: viewerId,
-          candidate: event.candidate
-        });
-      }
-    };
-
-    pc.onconnectionstatechange = () => {
-      console.log(`[Viewer ${viewerId}] Connection state:`, pc.connectionState);
-      if (pc.connectionState === 'failed') {
-        console.log(`[Viewer ${viewerId}] Retrying connection via ICE restart`);
-        pc.restartIce && pc.restartIce();
-      } else if (pc.connectionState === 'disconnected') {
-        setTimeout(() => {
-          if (pc.connectionState === 'disconnected') {
-            pc.close();
-            peerConnections.delete(viewerId);
-          }
-        }, 3000);
-      }
-    };
-
-    try {
-      // Create Offer with low-latency constraints
-      const offer = await pc.createOffer({
-        offerToReceiveAudio: false,
-        offerToReceiveVideo: false
-      });
-      await pc.setLocalDescription(offer);
-
-      socket.emit('webrtc-offer', {
-        targetViewerId: viewerId,
-        sdp: pc.localDescription
-      });
-      console.log(`[Host] Sent WebRTC offer to ${viewerId}`);
-    } catch (err) {
-      console.error(`Error creating WebRTC offer for ${viewerId}:`, err);
-    }
-  }
-
-  // Render Connected Viewers
+  // ── Viewer UI ─────────────────────────────────────────────────────────────
   function updateViewersUI() {
     const count = connectedViewers.size;
     viewerCountPill.textContent = `${count} Active`;
-
     if (count === 0) {
-      viewersList.innerHTML = `
-        <div class="empty-viewers" id="emptyViewersMsg">
-          <p>No phone connected yet. Scan the QR code above to start mirroring!</p>
-        </div>
-      `;
+      viewersList.innerHTML = '<div class="empty-viewers"><p>No phone connected yet. Scan the QR code above!</p></div>';
     } else {
       viewersList.innerHTML = '';
-      connectedViewers.forEach((info, viewerId) => {
+      connectedViewers.forEach((info) => {
+        const d = info.deviceInfo || {};
         const card = document.createElement('div');
         card.className = 'viewer-card';
-        const device = info.deviceInfo || {};
-        const deviceName = device.isMobile ? (device.os || 'Android Phone') : 'Browser Client';
-        
-        card.innerHTML = `
-          <div class="viewer-card-info">
-            <span class="viewer-dot"></span>
-            <div>
-              <div class="viewer-device-name">${deviceName}</div>
-              <div class="viewer-meta">${device.browser || 'Chrome'} • Live WebRTC</div>
-            </div>
-          </div>
-          <span class="badge badge-success">Live</span>
-        `;
+        card.innerHTML = `<div class="viewer-card-info"><span class="viewer-dot"></span><div><div class="viewer-device-name">${d.isMobile ? (d.os || 'Phone') : 'Browser'}</div><div class="viewer-meta">${d.browser || 'Chrome'} · Socket.IO Live</div></div></div><span class="badge badge-success">Live</span>`;
         viewersList.appendChild(card);
       });
     }
   }
 
-  // Socket.IO Events
+  // ── Socket Events ─────────────────────────────────────────────────────────
   socket.on('connect', () => {
-    console.log('[Host] Connected to signaling server');
+    console.log('[Host] Connected:', socket.id);
     socket.emit('host-join', { roomId });
   });
 
   socket.on('host-ready', (data) => {
-    console.log('[Host Ready] Room registered:', data);
-    if (data.viewers && data.viewers.length > 0) {
-      data.viewers.forEach(v => {
-        connectedViewers.set(v.viewerId, { deviceInfo: v.deviceInfo, joinedAt: Date.now() });
-        if (isStreaming && localStream) {
-          createPeerConnectionForViewer(v.viewerId);
-        }
-      });
+    console.log('[Host] Ready:', data);
+    if (data.viewers?.length) {
+      data.viewers.forEach(v => connectedViewers.set(v.viewerId, { deviceInfo: v.deviceInfo }));
       updateViewersUI();
     }
   });
 
-  // When a viewer explicitly requests the stream
-  socket.on('viewer-request-stream', ({ viewerId }) => {
-    console.log(`[Viewer Requested Stream] ID: ${viewerId}`);
-    if (isStreaming && localStream) {
-      createPeerConnectionForViewer(viewerId);
-    }
-  });
-
-  // When a new mobile viewer connects
   socket.on('viewer-connected', ({ viewerId, deviceInfo }) => {
-    console.log(`[Viewer Connected] ID: ${viewerId}`, deviceInfo);
-    connectedViewers.set(viewerId, { deviceInfo, joinedAt: Date.now() });
+    connectedViewers.set(viewerId, { deviceInfo });
     updateViewersUI();
-    showToast(`📱 Phone connected!`);
-
-    if (isStreaming && localStream) {
-      createPeerConnectionForViewer(viewerId);
-    }
+    showToast('📱 Phone connected! Starting stream...');
+    // If already streaming, viewer will auto-receive frames
   });
 
-  // When a viewer disconnects
   socket.on('viewer-disconnected', ({ viewerId }) => {
-    console.log(`[Viewer Disconnected] ID: ${viewerId}`);
     connectedViewers.delete(viewerId);
-    iceCandidateQueues.delete(viewerId);
-    if (peerConnections.has(viewerId)) {
-      try {
-        peerConnections.get(viewerId).close();
-      } catch (e) {}
-      peerConnections.delete(viewerId);
-    }
     updateViewersUI();
   });
 
-  // Handle WebRTC Answer from Viewer
-  socket.on('webrtc-answer', async ({ viewerId, sdp }) => {
-    const pc = peerConnections.get(viewerId);
-    if (pc) {
-      try {
-        await pc.setRemoteDescription(new RTCSessionDescription(sdp));
-        console.log(`[Host] Set remote description for viewer ${viewerId}`);
-
-        // Drain queued ICE candidates from viewer
-        const queue = iceCandidateQueues.get(viewerId) || [];
-        for (const candidate of queue) {
-          try {
-            await pc.addIceCandidate(new RTCIceCandidate(candidate));
-          } catch (e) {
-            console.error('[Host] Error draining queued ICE candidate:', e);
-          }
-        }
-        iceCandidateQueues.set(viewerId, []);
-      } catch (err) {
-        console.error(`Error setting remote description for ${viewerId}:`, err);
-      }
-    }
-  });
-
-  // Handle ICE Candidate from Viewer
-  socket.on('ice-candidate', async ({ sender, candidate }) => {
-    if (!candidate) return;
-    const pc = peerConnections.get(sender);
-    if (pc && pc.remoteDescription && pc.remoteDescription.type) {
-      try {
-        await pc.addIceCandidate(new RTCIceCandidate(candidate));
-      } catch (err) {
-        console.error('Error adding received ICE candidate on host:', err);
-      }
-    } else {
-      if (!iceCandidateQueues.has(sender)) {
-        iceCandidateQueues.set(sender, []);
-      }
-      iceCandidateQueues.get(sender).push(candidate);
-    }
-  });
-
-  // Handle Laser Pointer from Viewer
-  socket.on('laser-pointer', ({ viewerId, x, y }) => {
-    laserPointers.set(viewerId, {
-      x,
-      y,
-      timestamp: Date.now()
-    });
-  });
-
-  // Initial setup
   loadNetworkInfo();
 })();

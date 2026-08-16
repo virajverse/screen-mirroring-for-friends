@@ -69,18 +69,7 @@
   <main class="viewer-stage" id="viewerStage">
     <!-- Pinch & Pan Transform Wrapper -->
     <div class="transform-container" id="transformContainer">
-      <video id="remoteVideo" autoplay playsinline webkit-playsinline muted></video>
-      <div class="laser-touch-layer" id="laserTouchLayer"></div>
-    </div>
-
-    <!-- Audio Permission Banner (Browsers block autoplay with sound until tap) -->
-    <div class="audio-unmute-overlay" id="audioUnmuteOverlay" style="display: none;">
-      <button class="btn-unmute" id="unmuteAudioBtn">
-        <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
-          <path d="M11 5L6 9H2v6h4l5 4V5zM15.54 8.46a5 5 0 0 1 0 7.07M19.07 4.93a10 10 0 0 1 0 14.14"/>
-        </svg>
-        <span>Tap to Enable Laptop Audio</span>
-      </button>
+      <img id="remoteImage" class="remote-screen-img" alt="Host Screen Stream" src="" style="display: none;" />
     </div>
 
     <!-- Waiting State Screen -->
@@ -93,34 +82,34 @@
             <line x1="12" y1="17" x2="12" y2="21"></line>
           </svg>
         </div>
-        <h2 id="waitingTitle">Waiting for Host PC</h2>
-        <p id="waitingDesc">Please click "Start Screen Mirroring" on your laptop dashboard.</p>
-        <div class="waiting-badge">
-          <span class="mini-spinner"></span>
-          <span>Listening on LAN...</span>
+        <h2 id="waitingTitle">Connecting to Server...</h2>
+        <p id="waitingDesc">Establishing real-time cloud connection.</p>
+
+        <!-- Status Steps -->
+        <div class="status-steps">
+          <div class="status-step" id="stepServer">
+            <span class="step-icon active" id="stepServerIcon">●</span>
+            <span id="stepServerText">Cloud Server: Connecting...</span>
+          </div>
+          <div class="status-step" id="stepHost">
+            <span class="step-icon pending" id="stepHostIcon">○</span>
+            <span id="stepHostText">Host Laptop: Waiting...</span>
+          </div>
+          <div class="status-step" id="stepStream">
+            <span class="step-icon pending" id="stepStreamIcon">○</span>
+            <span id="stepStreamText">Screen Stream: Inactive</span>
+          </div>
         </div>
+
+        <button class="reconnect-btn" id="reconnectBtn" style="display:none;" onclick="location.reload()">
+          🔄 Reconnect
+        </button>
       </div>
     </div>
   </main>
 
   <!-- Bottom Floating Tool Dock -->
   <nav class="floating-dock" id="floatingDock">
-    <!-- Audio Toggle -->
-    <button class="dock-btn" id="audioToggleBtn" title="Toggle Audio">
-      <div class="dock-icon">
-        <svg id="audioOnIcon" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
-          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
-          <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
-        </svg>
-        <svg id="audioOffIcon" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" style="display: none;">
-          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
-          <line x1="23" y1="9" x2="17" y2="15"></line>
-          <line x1="17" y1="9" x2="23" y2="15"></line>
-        </svg>
-      </div>
-      <span class="dock-label">Audio</span>
-    </button>
-
     <!-- Zoom Reset -->
     <button class="dock-btn" id="resetZoomBtn" title="Reset Zoom">
       <div class="dock-icon">
