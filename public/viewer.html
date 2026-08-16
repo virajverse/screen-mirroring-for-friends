@@ -23,6 +23,16 @@
     </div>
     
     <div class="header-actions">
+      <!-- Change Room Button -->
+      <button class="room-pill-btn" id="openRoomModalBtn" title="Change Room ID">
+        <span>Room:</span>
+        <strong id="headerRoomId">default</strong>
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+        </svg>
+      </button>
+
       <!-- WakeLock Status -->
       <button class="icon-btn" id="wakeLockBtn" title="Keep screen awake">
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
@@ -62,6 +72,7 @@
     <div class="hud-item"><span class="hud-lbl">PING:</span> <span class="hud-val" id="hudPing">-- ms</span></div>
     <div class="hud-item"><span class="hud-lbl">FPS:</span> <span class="hud-val" id="hudFps">--</span></div>
     <div class="hud-item"><span class="hud-lbl">RES:</span> <span class="hud-val" id="hudRes">--</span></div>
+    <div class="hud-item"><span class="hud-lbl">ROOM:</span> <span class="hud-val" id="hudRoom">default</span></div>
     <div class="hud-item"><span class="hud-lbl">ZOOM:</span> <span class="hud-val" id="hudZoom">1.0x</span></div>
   </div>
 
@@ -84,6 +95,15 @@
         </div>
         <h2 id="waitingTitle">Connecting to Server...</h2>
         <p id="waitingDesc">Establishing real-time cloud connection.</p>
+
+        <!-- Room Input Form inside Waiting Card -->
+        <div class="room-input-card">
+          <label for="roomCodeInput" class="room-input-label">Room ID / PIN:</label>
+          <div class="room-input-row">
+            <input type="text" id="roomCodeInput" placeholder="e.g. default or AIR-1234" maxlength="20" value="default" />
+            <button type="button" id="applyRoomBtn" class="btn-join-room">Join</button>
+          </div>
+        </div>
 
         <!-- Status Steps -->
         <div class="status-steps">
@@ -110,6 +130,19 @@
 
   <!-- Bottom Floating Tool Dock -->
   <nav class="floating-dock" id="floatingDock">
+    <!-- Room Switch Dock Button -->
+    <button class="dock-btn" id="dockRoomBtn" title="Switch Room">
+      <div class="dock-icon">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+          <circle cx="9" cy="7" r="4"></circle>
+          <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+          <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+        </svg>
+      </div>
+      <span class="dock-label">Room</span>
+    </button>
+
     <!-- Zoom Reset -->
     <button class="dock-btn" id="resetZoomBtn" title="Reset Zoom">
       <div class="dock-icon">
@@ -144,6 +177,21 @@
       <span class="dock-label" id="fitModeLabel">Fit</span>
     </button>
   </nav>
+
+  <!-- Room Switch Modal Overlay -->
+  <div class="modal-overlay" id="roomModal" style="display: none;">
+    <div class="modal-card">
+      <h3>Switch Room</h3>
+      <p>Enter the Room ID or PIN from the Host Laptop dashboard:</p>
+      <div class="room-input-row" style="margin: 1rem 0;">
+        <input type="text" id="modalRoomInput" placeholder="e.g. AIR-8921" maxlength="20" />
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-cancel" id="cancelModalBtn">Cancel</button>
+        <button type="button" class="btn btn-confirm" id="confirmModalBtn">Connect</button>
+      </div>
+    </div>
+  </div>
 
   <!-- Toast Notification Container -->
   <div id="toastContainer" class="toast-container"></div>

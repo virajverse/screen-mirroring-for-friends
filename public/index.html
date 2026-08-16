@@ -122,7 +122,19 @@
       <section class="panel connect-panel">
         <div class="panel-header">
           <h2>Connect Mobile Device</h2>
-          <span class="badge badge-success">Wi-Fi LAN</span>
+          <span class="badge badge-success">Wi-Fi / Cloud</span>
+        </div>
+
+        <!-- Room ID Bar -->
+        <div class="room-id-bar">
+          <div class="room-id-info">
+            <span class="room-label">Room PIN / ID:</span>
+            <strong class="room-code-display" id="hostRoomDisplay">default</strong>
+          </div>
+          <div class="room-btn-group">
+            <button id="copyRoomCodeBtn" class="btn btn-sm btn-primary" title="Copy Room PIN">Copy PIN</button>
+            <button id="changeHostRoomBtn" class="btn btn-sm btn-secondary" title="Change Room PIN">Change</button>
+          </div>
         </div>
 
         <!-- QR Code Card -->

@@ -1,22 +1,26 @@
-// Mobile Viewer Controller - Ultra-Fast Socket.IO Frame Renderer (100% Cloud-Compatible)
+// Mobile Viewer Controller - Ultra-Fast Socket.IO Frame Renderer with Room Management
 (function () {
   const socket = io(window.location.origin, {
     transports: ['websocket', 'polling']
   });
+
   const urlParams = new URLSearchParams(window.location.search);
-  const roomId = urlParams.get('room') || 'default';
+  let currentRoom = (urlParams.get('room') || 'default').trim().toLowerCase();
 
   // DOM Elements
   const viewerHeader = document.getElementById('viewerHeader');
   const floatingDock = document.getElementById('floatingDock');
   const liveDot = document.getElementById('liveDot');
   const streamStateTag = document.getElementById('streamStateTag');
+  const headerRoomId = document.getElementById('headerRoomId');
   const remoteImage = document.getElementById('remoteImage');
   const transformContainer = document.getElementById('transformContainer');
   const stage = document.getElementById('viewerStage');
   const waitingState = document.getElementById('waitingState');
   const waitingTitle = document.getElementById('waitingTitle');
   const waitingDesc = document.getElementById('waitingDesc');
+  const roomCodeInput = document.getElementById('roomCodeInput');
+  const applyRoomBtn = document.getElementById('applyRoomBtn');
   const stepServerIcon = document.getElementById('stepServerIcon');
   const stepServerText = document.getElementById('stepServerText');
   const stepHostIcon = document.getElementById('stepHostIcon');
@@ -25,12 +29,21 @@
   const stepStreamText = document.getElementById('stepStreamText');
   const reconnectBtn = document.getElementById('reconnectBtn');
 
+  // Room Modal Elements
+  const openRoomModalBtn = document.getElementById('openRoomModalBtn');
+  const dockRoomBtn = document.getElementById('dockRoomBtn');
+  const roomModal = document.getElementById('roomModal');
+  const modalRoomInput = document.getElementById('modalRoomInput');
+  const cancelModalBtn = document.getElementById('cancelModalBtn');
+  const confirmModalBtn = document.getElementById('confirmModalBtn');
+
   const wakeLockBtn = document.getElementById('wakeLockBtn');
   const toggleHudBtn = document.getElementById('toggleHudBtn');
   const telemetryHud = document.getElementById('telemetryHud');
   const hudPing = document.getElementById('hudPing');
   const hudFps = document.getElementById('hudFps');
   const hudRes = document.getElementById('hudRes');
+  const hudRoom = document.getElementById('hudRoom');
   const hudZoom = document.getElementById('hudZoom');
   const fullscreenBtn = document.getElementById('fullscreenBtn');
   const enterFsIcon = document.getElementById('enterFsIcon');
@@ -68,6 +81,15 @@
   let touchStartY = 0;
   let lastTapTime = 0;
 
+  // Initialize UI with Current Room
+  function syncRoomUI() {
+    headerRoomId.textContent = currentRoom;
+    hudRoom.textContent = currentRoom;
+    roomCodeInput.value = currentRoom;
+    modalRoomInput.value = currentRoom;
+  }
+  syncRoomUI();
+
   // Helper: Toast
   function showToast(text) {
     const toast = document.createElement('div');
@@ -81,6 +103,82 @@
       setTimeout(() => toast.remove(), 300);
     }, 2500);
   }
+
+  // Switch / Join Room Function
+  function joinRoom(newRoomId) {
+    const cleaned = (newRoomId || 'default').trim().toLowerCase();
+    currentRoom = cleaned;
+    syncRoomUI();
+
+    // Update browser URL without reload
+    const newUrl = new URL(window.location);
+    if (cleaned === 'default') {
+      newUrl.searchParams.delete('room');
+    } else {
+      newUrl.searchParams.set('room', cleaned);
+    }
+    window.history.replaceState({}, '', newUrl);
+
+    // Reset stream state
+    remoteImage.style.display = 'none';
+    waitingState.style.display = 'flex';
+    liveDot.classList.remove('active');
+    streamStateTag.textContent = 'Connecting...';
+    streamStateTag.classList.remove('live');
+
+    stepHostIcon.className = 'step-icon pending';
+    stepHostIcon.textContent = '○';
+    stepHostText.textContent = 'Host Laptop: Connecting...';
+    stepStreamIcon.className = 'step-icon pending';
+    stepStreamIcon.textContent = '○';
+    stepStreamText.textContent = 'Screen Stream: Inactive';
+
+    if (socket.connected) {
+      const deviceInfo = getDeviceInfo();
+      socket.emit('viewer-join', { roomId: currentRoom, deviceInfo });
+    }
+
+    showToast(`🔑 Joined Room: ${currentRoom}`);
+  }
+
+  // Room Input Events
+  applyRoomBtn.addEventListener('click', () => {
+    if (roomCodeInput.value) {
+      joinRoom(roomCodeInput.value);
+    }
+  });
+
+  roomCodeInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      applyRoomBtn.click();
+    }
+  });
+
+  // Modal Open / Close
+  function openRoomModal() {
+    modalRoomInput.value = currentRoom;
+    roomModal.style.display = 'flex';
+    setTimeout(() => modalRoomInput.focus(), 100);
+  }
+  function closeRoomModal() {
+    roomModal.style.display = 'none';
+  }
+
+  openRoomModalBtn.addEventListener('click', openRoomModal);
+  dockRoomBtn.addEventListener('click', openRoomModal);
+  cancelModalBtn.addEventListener('click', closeRoomModal);
+  confirmModalBtn.addEventListener('click', () => {
+    if (modalRoomInput.value) {
+      joinRoom(modalRoomInput.value);
+      closeRoomModal();
+    }
+  });
+  modalRoomInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      confirmModalBtn.click();
+    }
+  });
 
   // Device Info Detection
   function getDeviceInfo() {
@@ -101,7 +199,7 @@
     return { isMobile, os, browser };
   }
 
-  // Screen WakeLock (Keep mobile screen awake while watching)
+  // Screen WakeLock
   async function requestWakeLock() {
     if ('wakeLock' in navigator) {
       try {
@@ -187,7 +285,7 @@
     }
   }
 
-  // Toggle Controls (Tap anywhere to hide/show navigation dock)
+  // Toggle Controls
   function toggleControls() {
     isControlsHidden = !isControlsHidden;
     if (isControlsHidden) {
@@ -199,7 +297,7 @@
     }
   }
 
-  // Snapshot / Screenshot Tool
+  // Snapshot
   snapshotBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     if (!remoteImage.src || remoteImage.style.display === 'none') {
@@ -207,7 +305,7 @@
       return;
     }
     const link = document.createElement('a');
-    link.download = `aircast-screenshot-${Date.now()}.jpg`;
+    link.download = `aircast-${currentRoom}-${Date.now()}.jpg`;
     link.href = remoteImage.src;
     link.click();
     showToast('📸 Screenshot Saved!');
@@ -227,9 +325,9 @@
     return Math.sqrt(dx * dx + dy * dy);
   }
 
-  // Mobile Touch Gestures (Pinch to Zoom & Pan - 100% Client-Side Read-Only)
+  // Mobile Touch Gestures
   stage.addEventListener('touchstart', (e) => {
-    if (e.target.closest('button') || e.target.closest('.floating-dock') || e.target.closest('.viewer-header')) {
+    if (e.target.closest('button') || e.target.closest('input') || e.target.closest('.floating-dock') || e.target.closest('.viewer-header') || e.target.closest('.modal-card')) {
       return;
     }
 
@@ -248,7 +346,7 @@
   }, { passive: false });
 
   stage.addEventListener('touchmove', (e) => {
-    if (e.target.closest('button') || e.target.closest('.floating-dock') || e.target.closest('.viewer-header')) {
+    if (e.target.closest('button') || e.target.closest('input') || e.target.closest('.floating-dock') || e.target.closest('.viewer-header')) {
       return;
     }
     
@@ -278,7 +376,7 @@
   }, { passive: false });
 
   stage.addEventListener('touchend', (e) => {
-    if (e.target.closest('button') || e.target.closest('.floating-dock') || e.target.closest('.viewer-header')) {
+    if (e.target.closest('button') || e.target.closest('input') || e.target.closest('.floating-dock') || e.target.closest('.viewer-header') || e.target.closest('.modal-card')) {
       return;
     }
 
@@ -311,7 +409,6 @@
   socket.on('video-frame', (frameBuffer) => {
     if (!frameBuffer) return;
 
-    // Convert binary buffer to Blob
     const blob = new Blob([frameBuffer], { type: 'image/jpeg' });
     const newUrl = URL.createObjectURL(blob);
 
@@ -328,12 +425,10 @@
       requestWakeLock();
     }
 
-    // Revoke previous blob URL to prevent memory leaks
     if (oldUrl) {
       URL.revokeObjectURL(oldUrl);
     }
 
-    // FPS Counter & Telemetry
     frameCount++;
     const now = Date.now();
     if (now - lastFpsTime >= 1000) {
@@ -360,7 +455,7 @@
     reconnectBtn.style.display = 'none';
 
     const deviceInfo = getDeviceInfo();
-    socket.emit('viewer-join', { roomId, deviceInfo });
+    socket.emit('viewer-join', { roomId: currentRoom, deviceInfo });
   });
 
   socket.on('disconnect', () => {
@@ -405,7 +500,7 @@
       stepStreamText.textContent = 'Screen Stream: Inactive';
 
       waitingTitle.textContent = 'Waiting for Laptop';
-      waitingDesc.textContent = 'Please open the website on your laptop.';
+      waitingDesc.textContent = `No host active in Room "${currentRoom}". Open laptop dashboard or check Room ID.`;
     }
   });
 
