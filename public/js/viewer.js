@@ -69,15 +69,25 @@
   let lastDecodedFrames = 0;
   let lastStatsTime = Date.now();
 
-  // Multi-STUN Server configuration for robust Internet & LAN WebRTC
+  // Multi-STUN & Open TURN Server configuration for 100% reliable WebRTC across all networks
   const rtcConfig = {
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun1.l.google.com:19302' },
       { urls: 'stun:stun2.l.google.com:19302' },
       { urls: 'stun:stun3.l.google.com:19302' },
-      { urls: 'stun:stun4.l.google.com:19302' },
-      { urls: 'stun:global.stun.twilio.com:3478' }
+      { urls: 'stun:stun.cloudflare.com:3478' },
+      { urls: 'stun:global.stun.twilio.com:3478' },
+      {
+        urls: 'turn:openrelay.metered.ca:80',
+        username: 'openrelayproject',
+        credential: 'openrelayproject'
+      },
+      {
+        urls: 'turn:openrelay.metered.ca:443',
+        username: 'openrelayproject',
+        credential: 'openrelayproject'
+      }
     ],
     iceCandidatePoolSize: 10
   };
@@ -385,14 +395,6 @@
     pendingIceCandidates = [];
     peerConnection = new RTCPeerConnection(rtcConfig);
 
-    // Explicitly add transceivers for receiving video and audio
-    try {
-      peerConnection.addTransceiver('video', { direction: 'recvonly' });
-      peerConnection.addTransceiver('audio', { direction: 'recvonly' });
-    } catch (e) {
-      console.log('[Viewer] addTransceiver fallback:', e);
-    }
-
     peerConnection.ontrack = (event) => {
       console.log('[Viewer] Track received:', event.track.kind);
       
@@ -496,7 +498,7 @@
 
   // Socket.IO Handlers
   socket.on('connect', () => {
-    console.log('[Viewer] Connected to signaling server, ID:', socket.id);
+    console.log('[Viewer] Connected to server, ID:', socket.id);
     const deviceInfo = getDeviceInfo();
     socket.emit('viewer-join', { roomId, deviceInfo });
   });
@@ -504,9 +506,12 @@
   socket.on('host-status', ({ isHostOnline, isStreaming }) => {
     console.log('[Viewer] Host status:', { isHostOnline, isStreaming });
     if (isHostOnline) {
+      // Automatically request stream from host
+      socket.emit('viewer-request-stream', { roomId });
+
       if (isStreaming) {
         waitingTitle.textContent = 'Host is Live';
-        waitingDesc.textContent = 'Connecting to 60 FPS stream...';
+        waitingDesc.textContent = 'Negotiating 60 FPS connection...';
       } else {
         waitingTitle.textContent = 'Host Connected';
         waitingDesc.textContent = 'Waiting for laptop to click "Start Screen Mirroring"...';
@@ -521,6 +526,9 @@
   socket.on('webrtc-offer', async ({ hostId, sdp }) => {
     hostSocketId = hostId;
     console.log('[Viewer] Received WebRTC offer from host:', hostId);
+
+    waitingTitle.textContent = 'Receiving Stream';
+    waitingDesc.textContent = 'Starting 60 FPS video playback...';
 
     initWebRTC();
 

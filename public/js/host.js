@@ -40,15 +40,25 @@
   const iceCandidateQueues = new Map(); // viewerId -> [candidate]
   const connectedViewers = new Map(); // viewerId -> info
 
-  // Multi-STUN Server configuration for robust Internet & LAN WebRTC
+  // Multi-STUN & Open TURN Server configuration for 100% reliable WebRTC across all networks
   const rtcConfig = {
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun1.l.google.com:19302' },
       { urls: 'stun:stun2.l.google.com:19302' },
       { urls: 'stun:stun3.l.google.com:19302' },
-      { urls: 'stun:stun4.l.google.com:19302' },
-      { urls: 'stun:global.stun.twilio.com:3478' }
+      { urls: 'stun:stun.cloudflare.com:3478' },
+      { urls: 'stun:global.stun.twilio.com:3478' },
+      {
+        urls: 'turn:openrelay.metered.ca:80',
+        username: 'openrelayproject',
+        credential: 'openrelayproject'
+      },
+      {
+        urls: 'turn:openrelay.metered.ca:443',
+        username: 'openrelayproject',
+        credential: 'openrelayproject'
+      }
     ],
     iceCandidatePoolSize: 10
   };
@@ -353,6 +363,14 @@
         }
       });
       updateViewersUI();
+    }
+  });
+
+  // When a viewer explicitly requests the stream
+  socket.on('viewer-request-stream', ({ viewerId }) => {
+    console.log(`[Viewer Requested Stream] ID: ${viewerId}`);
+    if (isStreaming && localStream) {
+      createPeerConnectionForViewer(viewerId);
     }
   });
 

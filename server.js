@@ -186,6 +186,18 @@ io.on('connection', (socket) => {
     console.log(`[Viewer Connected] Room: ${roomId}, Viewer: ${socket.id}, Host Online: ${isHostOnline}`);
   });
 
+  // Viewer requests stream directly
+  socket.on('viewer-request-stream', ({ roomId = 'default' }) => {
+    if (rooms.has(roomId)) {
+      const roomInfo = rooms.get(roomId);
+      if (roomInfo.hostSocketId) {
+        io.to(roomInfo.hostSocketId).emit('viewer-request-stream', {
+          viewerId: socket.id
+        });
+      }
+    }
+  });
+
   // WebRTC Signaling: Offer from Host to a specific Viewer
   socket.on('webrtc-offer', ({ targetViewerId, sdp }) => {
     io.to(targetViewerId).emit('webrtc-offer', {
