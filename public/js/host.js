@@ -23,8 +23,6 @@
   const copyUrlBtn      = document.getElementById('copyUrlBtn');
   const openViewerTabBtn = document.getElementById('openViewerTabBtn');
   const shareAudioToggle = document.getElementById('shareAudioToggle');
-  const networkSelectGroup = document.getElementById('networkSelectGroup');
-  const networkIpSelect = document.getElementById('networkIpSelect');
   const viewersList     = document.getElementById('viewersList');
   const viewerCountPill = document.getElementById('viewerCountPill');
   const statResolution  = document.getElementById('statResolution');
@@ -35,25 +33,22 @@
   // State
   let localStream       = null;
   let isStreaming       = false;
-  let selectedQuality   = '720p';
+  let selectedQuality   = '720p60';
   let captureInterval   = null;
   let frameCount        = 0;
   let lastFpsTime       = Date.now();
   const connectedViewers = new Map();
 
-  // Hidden video + canvas for frame capture
-  const captureVideo  = document.createElement('video');
+  // Canvas for frame processing
   const captureCanvas = document.createElement('canvas');
-  const captureCtx    = captureCanvas.getContext('2d');
-  captureVideo.muted  = true;
-  captureVideo.playsInline = true;
+  const captureCtx    = captureCanvas.getContext('2d', { alpha: false });
 
-  // Quality Profiles
+  // Quality Profiles (Optimized for speed & smoothness over cloud)
   const qualityProfiles = {
-    '1080p60': { width: 1280, height: 720, fps: 20, jpegQ: 0.75, label: '720p / 20fps' },
-    '4k'     : { width: 1920, height: 1080, fps: 15, jpegQ: 0.70, label: '1080p / 15fps' },
-    '720p60' : { width: 1280, height: 720,  fps: 25, jpegQ: 0.75, label: '720p / 25fps' },
-    'low'    : { width: 854,  height: 480,  fps: 15, jpegQ: 0.60, label: '480p / 15fps' }
+    '1080p60': { width: 1280, height: 720, fps: 24, jpegQ: 0.65, label: '720p / 24fps' },
+    '4k'     : { width: 1920, height: 1080, fps: 15, jpegQ: 0.60, label: '1080p / 15fps' },
+    '720p60' : { width: 960,  height: 540,  fps: 25, jpegQ: 0.65, label: '540p / 25fps' },
+    'low'    : { width: 640,  height: 360,  fps: 18, jpegQ: 0.55, label: '360p / 18fps' }
   };
 
   // Sync Room UI
@@ -146,28 +141,35 @@
       qualityButtons.forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       selectedQuality = btn.dataset.quality;
-      if (isStreaming) showToast('⚙️ Quality changes on next start');
+      if (isStreaming) {
+        const profile = qualityProfiles[selectedQuality] || qualityProfiles['720p60'];
+        startFrameCapture(profile);
+        showToast(`⚙️ Switched to ${btn.querySelector('.q-title').textContent}`);
+      }
     });
   });
 
-  // ── Start Frame Streaming ─────────────────────────────────────────────────
+  // ── Start Screen Capture ──────────────────────────────────────────────────
   async function startScreenMirroring() {
     try {
       const profile = qualityProfiles[selectedQuality] || qualityProfiles['720p60'];
-      const captureAudio = shareAudioToggle.checked;
+      const captureAudio = shareAudioToggle ? shareAudioToggle.checked : false;
 
       localStream = await navigator.mediaDevices.getDisplayMedia({
-        video: { cursor: 'always', width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } },
-        audio: captureAudio ? { echoCancellation: false, noiseSuppression: false, autoGainControl: false } : false
+        video: { cursor: 'always', width: { ideal: 1920 }, height: { ideal: 1080 } },
+        audio: captureAudio
       });
 
-      // Show preview
+      // Show attached preview
       hostPreviewVideo.srcObject = localStream;
+      hostPreviewVideo.muted = true;
+      await hostPreviewVideo.play();
+
       previewEmpty.style.display = 'none';
       videoWrapper.style.display = 'block';
       isStreaming = true;
 
-      // UI
+      // UI Updates
       toggleBtnText.textContent = 'Stop Screen Mirroring';
       toggleStreamBtn.classList.add('streaming');
       playIcon.style.display = 'none';
@@ -175,24 +177,21 @@
       statusBadge.className = 'status-badge status-live';
       statusText.textContent = 'Live Streaming';
 
-      // Setup capture
-      captureVideo.srcObject = localStream;
-      captureVideo.play();
-
+      // Notify room
       socket.emit('stream-state', { isStreaming: true });
 
-      // Start frame capture loop
+      // Start continuous frame broadcasting
       startFrameCapture(profile);
 
       localStream.getVideoTracks()[0].onended = stopScreenMirroring;
-      showToast(`🚀 Screen Mirroring Started in Room "${roomId}"!`);
+      showToast(`🚀 Screen Mirroring Active in Room "${roomId}"!`);
     } catch (err) {
       console.error('[Host] Start failed:', err);
       if (err.name !== 'NotAllowedError') alert('Could not start screen capture: ' + err.message);
     }
   }
 
-  // ── Frame Capture Loop ────────────────────────────────────────────────────
+  // ── Frame Capture & Broadcast Loop ────────────────────────────────────────
   function startFrameCapture(profile) {
     if (captureInterval) clearInterval(captureInterval);
 
@@ -202,23 +201,26 @@
     const quality = profile.jpegQ;
 
     captureInterval = setInterval(() => {
-      if (!captureVideo.videoWidth || !isStreaming) return;
+      if (!isStreaming || !hostPreviewVideo.videoWidth || hostPreviewVideo.readyState < 2) return;
 
-      let w = captureVideo.videoWidth;
-      let h = captureVideo.videoHeight;
+      let w = hostPreviewVideo.videoWidth;
+      let h = hostPreviewVideo.videoHeight;
       const ratio = Math.min(maxW / w, maxH / h, 1);
       w = Math.round(w * ratio);
       h = Math.round(h * ratio);
 
       captureCanvas.width  = w;
       captureCanvas.height = h;
-      captureCtx.drawImage(captureVideo, 0, 0, w, h);
+      captureCtx.drawImage(hostPreviewVideo, 0, 0, w, h);
 
-      captureCanvas.toBlob(blob => {
-        if (!blob || !socket.connected || connectedViewers.size === 0) return;
-        blob.arrayBuffer().then(buf => socket.emit('video-frame', buf));
-      }, 'image/jpeg', quality);
+      // Fast JPEG generation
+      const frameData = captureCanvas.toDataURL('image/jpeg', quality);
 
+      if (socket.connected) {
+        socket.emit('video-frame', frameData);
+      }
+
+      // FPS & Telemetry
       frameCount++;
       const now = Date.now();
       if (now - lastFpsTime >= 1000) {
@@ -230,12 +232,11 @@
     }, interval);
   }
 
-  // ── Stop ──────────────────────────────────────────────────────────────────
+  // ── Stop Screen Mirroring ─────────────────────────────────────────────────
   function stopScreenMirroring() {
     if (captureInterval) { clearInterval(captureInterval); captureInterval = null; }
     if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
 
-    captureVideo.srcObject = null;
     isStreaming = false;
     toggleBtnText.textContent = 'Start Screen Mirroring';
     toggleStreamBtn.classList.remove('streaming');
@@ -259,7 +260,7 @@
     const count = connectedViewers.size;
     viewerCountPill.textContent = `${count} Active`;
     if (count === 0) {
-      viewersList.innerHTML = `<div class="empty-viewers"><p>No phone connected in Room "${roomId}". Scan the QR code or enter PIN on phone!</p></div>`;
+      viewersList.innerHTML = `<div class="empty-viewers"><p>No phone connected in Room "${roomId}". Scan QR code or open link on phone!</p></div>`;
     } else {
       viewersList.innerHTML = '';
       connectedViewers.forEach((info) => {
@@ -274,7 +275,7 @@
 
   // ── Socket Events ─────────────────────────────────────────────────────────
   socket.on('connect', () => {
-    console.log('[Host] Connected:', socket.id, 'Room:', roomId);
+    console.log('[Host] Connected to server:', socket.id, 'Room:', roomId);
     socket.emit('host-join', { roomId });
   });
 
@@ -289,7 +290,11 @@
   socket.on('viewer-connected', ({ viewerId, deviceInfo }) => {
     connectedViewers.set(viewerId, { deviceInfo });
     updateViewersUI();
-    showToast('📱 Phone joined this room! Streaming...');
+    showToast('📱 Phone connected to your stream!');
+    // If currently streaming, send immediate stream state
+    if (isStreaming) {
+      socket.emit('stream-state', { isStreaming: true });
+    }
   });
 
   socket.on('viewer-disconnected', ({ viewerId }) => {

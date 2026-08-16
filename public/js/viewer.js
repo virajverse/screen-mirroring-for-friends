@@ -56,7 +56,6 @@
   const toastContainer = document.getElementById('toastContainer');
 
   // State
-  let currentObjectUrl = null;
   let isFitCover = false;
   let isControlsHidden = false;
   let wakeLockSentinel = null;
@@ -405,18 +404,13 @@
     }
   });
 
-  // ── Ultra-Fast Frame Receiving ─────────────────────────────────────────────
-  socket.on('video-frame', (frameBuffer) => {
-    if (!frameBuffer) return;
+  // ── Ultra-Fast Instant Frame Display ──────────────────────────────────────
+  socket.on('video-frame', (frameData) => {
+    if (!frameData) return;
 
-    const blob = new Blob([frameBuffer], { type: 'image/jpeg' });
-    const newUrl = URL.createObjectURL(blob);
+    remoteImage.src = frameData;
 
-    const oldUrl = currentObjectUrl;
-    currentObjectUrl = newUrl;
-    remoteImage.src = newUrl;
-
-    if (remoteImage.style.display === 'none') {
+    if (remoteImage.style.display !== 'block') {
       remoteImage.style.display = 'block';
       waitingState.style.display = 'none';
       liveDot.classList.add('active');
@@ -425,17 +419,13 @@
       requestWakeLock();
     }
 
-    if (oldUrl) {
-      URL.revokeObjectURL(oldUrl);
-    }
-
     frameCount++;
     const now = Date.now();
     if (now - lastFpsTime >= 1000) {
       hudFps.textContent = `${frameCount} FPS`;
       frameCount = 0;
       lastFpsTime = now;
-      hudPing.textContent = `${Math.min(now - lastPingTime, 45)} ms`;
+      hudPing.textContent = `${Math.min(now - lastPingTime, 40)} ms`;
       lastPingTime = now;
     }
 
@@ -448,7 +438,7 @@
 
   // ── Socket Events ─────────────────────────────────────────────────────────
   socket.on('connect', () => {
-    console.log('[Viewer] Connected to cloud server:', socket.id);
+    console.log('[Viewer] Connected to cloud server:', socket.id, 'Room:', currentRoom);
     stepServerIcon.className = 'step-icon done';
     stepServerIcon.textContent = '✓';
     stepServerText.textContent = 'Cloud Server: Connected';
