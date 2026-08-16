@@ -182,8 +182,6 @@
       videoWrapper.style.display = 'block';
       hostPreviewVideo.srcObject = localStream;
 
-      initLaserCanvas();
-
       // Read stream track info
       const videoTrack = localStream.getVideoTracks()[0];
       const settings = videoTrack.getSettings();
