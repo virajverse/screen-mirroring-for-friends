@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=no">
+  <meta name="theme-color" content="#000000">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>AirCast Mobile Viewer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/viewer.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📱</text></svg>">
+</head>
+<body class="theme-oled">
+  <!-- Top Minimal Floating Nav -->
+  <header class="viewer-header" id="viewerHeader">
+    <div class="brand-badge">
+      <span class="live-dot" id="liveDot"></span>
+      <span class="brand-title">AirCast</span>
+      <span class="stream-state-tag" id="streamStateTag">Connecting...</span>
+    </div>
+    
+    <div class="header-actions">
+      <!-- WakeLock Status -->
+      <button class="icon-btn" id="wakeLockBtn" title="Keep screen awake">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="5"></circle>
+          <line x1="12" y1="1" x2="12" y2="3"></line>
+          <line x1="12" y1="21" x2="12" y2="23"></line>
+          <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+          <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+          <line x1="1" y1="12" x2="3" y2="12"></line>
+          <line x1="21" y1="12" x2="23" y2="12"></line>
+          <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+          <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+        </svg>
+      </button>
+
+      <!-- Telemetry Toggle -->
+      <button class="icon-btn" id="toggleHudBtn" title="Toggle Stats HUD">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M18 20V10M12 20V4M6 20v-6"></path>
+        </svg>
+      </button>
+
+      <!-- Fullscreen Button -->
+      <button class="icon-btn" id="fullscreenBtn" title="Fullscreen">
+        <svg id="enterFsIcon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path>
+        </svg>
+        <svg id="exitFsIcon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" style="display: none;">
+          <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"></path>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- Live Stats Telemetry HUD Overlay -->
+  <div class="telemetry-hud" id="telemetryHud" style="display: none;">
+    <div class="hud-item"><span class="hud-lbl">PING:</span> <span class="hud-val" id="hudPing">-- ms</span></div>
+    <div class="hud-item"><span class="hud-lbl">FPS:</span> <span class="hud-val" id="hudFps">--</span></div>
+    <div class="hud-item"><span class="hud-lbl">RES:</span> <span class="hud-val" id="hudRes">--</span></div>
+    <div class="hud-item"><span class="hud-lbl">ZOOM:</span> <span class="hud-val" id="hudZoom">1.0x</span></div>
+  </div>
+
+  <!-- Main Viewport Stage -->
+  <main class="viewer-stage" id="viewerStage">
+    <!-- Pinch & Pan Transform Wrapper -->
+    <div class="transform-container" id="transformContainer">
+      <video id="remoteVideo" autoplay playsinline></video>
+      <div class="laser-touch-layer" id="laserTouchLayer"></div>
+    </div>
+
+    <!-- Audio Permission Banner (Browsers block autoplay with sound until tap) -->
+    <div class="audio-unmute-overlay" id="audioUnmuteOverlay" style="display: none;">
+      <button class="btn-unmute" id="unmuteAudioBtn">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
+          <path d="M11 5L6 9H2v6h4l5 4V5zM15.54 8.46a5 5 0 0 1 0 7.07M19.07 4.93a10 10 0 0 1 0 14.14"/>
+        </svg>
+        <span>Tap to Enable Laptop Audio</span>
+      </button>
+    </div>
+
+    <!-- Waiting State Screen -->
+    <div class="waiting-state" id="waitingState">
+      <div class="waiting-card">
+        <div class="pulse-ring">
+          <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+            <line x1="8" y1="21" x2="16" y2="21"></line>
+            <line x1="12" y1="17" x2="12" y2="21"></line>
+          </svg>
+        </div>
+        <h2 id="waitingTitle">Waiting for Host PC</h2>
+        <p id="waitingDesc">Please click "Start Screen Mirroring" on your laptop dashboard.</p>
+        <div class="waiting-badge">
+          <span class="mini-spinner"></span>
+          <span>Listening on LAN...</span>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Bottom Floating Tool Dock -->
+  <nav class="floating-dock" id="floatingDock">
+    <!-- Laser Pointer Mode -->
+    <button class="dock-btn" id="laserModeBtn" title="Laser Pointer Mode">
+      <div class="dock-icon laser-icon">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="4"></circle>
+          <path d="M12 2v4M12 18v4M2 12h4M18 12h4"></path>
+        </svg>
+      </div>
+      <span class="dock-label">Laser</span>
+    </button>
+
+    <!-- Audio Toggle -->
+    <button class="dock-btn" id="audioToggleBtn" title="Toggle Audio">
+      <div class="dock-icon">
+        <svg id="audioOnIcon" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
+          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+          <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+        </svg>
+        <svg id="audioOffIcon" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" style="display: none;">
+          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+          <line x1="23" y1="9" x2="17" y2="15"></line>
+          <line x1="17" y1="9" x2="23" y2="15"></line>
+        </svg>
+      </div>
+      <span class="dock-label">Audio</span>
+    </button>
+
+    <!-- Zoom Reset -->
+    <button class="dock-btn" id="resetZoomBtn" title="Reset Zoom">
+      <div class="dock-icon">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="11" cy="11" r="8"></circle>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          <line x1="8" y1="11" x2="14" y2="11"></line>
+        </svg>
+      </div>
+      <span class="dock-label" id="zoomLevelLabel">100%</span>
+    </button>
+
+    <!-- Snapshot -->
+    <button class="dock-btn" id="snapshotBtn" title="Take Screenshot">
+      <div class="dock-icon">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+          <circle cx="12" cy="13" r="4"></circle>
+        </svg>
+      </div>
+      <span class="dock-label">Snapshot</span>
+    </button>
+
+    <!-- Fit / Stretch Mode -->
+    <button class="dock-btn" id="fitModeBtn" title="Fit to Screen">
+      <div class="dock-icon">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+          <polyline points="9 3 9 21"></polyline>
+        </svg>
+      </div>
+      <span class="dock-label" id="fitModeLabel">Fit</span>
+    </button>
+  </nav>
+
+  <!-- Toast Notification Container -->
+  <div id="toastContainer" class="toast-container"></div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/js/viewer.js"></script>
+</body>
+</html>

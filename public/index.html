@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AirCast PC - Real-Time Laptop Screen Mirroring</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/host.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🖥️</text></svg>">
+</head>
+<body class="theme-dark">
+  <div class="ambient-glow glow-1"></div>
+  <div class="ambient-glow glow-2"></div>
+
+  <div class="app-container">
+    <!-- Header -->
+    <header class="main-header">
+      <div class="brand">
+        <div class="logo-icon">
+          <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+            <line x1="8" y1="21" x2="16" y2="21"></line>
+            <line x1="12" y1="17" x2="12" y2="21"></line>
+            <path d="M17 9l3-3m-3 6l3 3M7 9L4 6m3 6l-3 3" stroke="currentColor" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <h1>AirCast <span>PC</span></h1>
+          <p class="subtitle">Zero-Lag Real-Time Screen Mirroring to Android</p>
+        </div>
+      </div>
+      <div class="header-status">
+        <div id="connectionStatusBadge" class="status-badge status-idle">
+          <span class="status-dot"></span>
+          <span id="statusText">Ready to Cast</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Grid -->
+    <main class="dashboard-grid">
+      <!-- Left Column: Controls & Preview -->
+      <section class="panel control-panel">
+        <div class="panel-header">
+          <h2>Stream Controls</h2>
+          <span class="badge" id="codecBadge">H.264 / 60 FPS</span>
+        </div>
+
+        <!-- Master Action Button -->
+        <div class="master-action">
+          <button id="toggleStreamBtn" class="btn btn-primary btn-large">
+            <span class="btn-icon play-icon">
+              <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
+                <polygon points="5 3 19 12 5 21 5 3"></polygon>
+              </svg>
+            </span>
+            <span class="btn-icon stop-icon" style="display: none;">
+              <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
+                <rect x="5" y="5" width="14" height="14" rx="2"></rect>
+              </svg>
+            </span>
+            <span id="toggleBtnText">Start Screen Mirroring</span>
+          </button>
+          <p class="btn-caption">Select your entire screen, specific app, or browser tab with audio</p>
+        </div>
+
+        <!-- Settings Selector -->
+        <div class="settings-group">
+          <label class="section-label">Quality Profile</label>
+          <div class="quality-grid">
+            <button class="quality-card active" data-quality="1080p60">
+              <div class="q-title">Ultra HD</div>
+              <div class="q-sub">1080p @ 60fps</div>
+            </button>
+            <button class="quality-card" data-quality="4k">
+              <div class="q-title">Crisp 4K</div>
+              <div class="q-sub">2160p @ 30fps</div>
+            </button>
+            <button class="quality-card" data-quality="720p60">
+              <div class="q-title">Fast Gaming</div>
+              <div class="q-sub">720p @ 60fps</div>
+            </button>
+            <button class="quality-card" data-quality="low">
+              <div class="q-title">Eco Saver</div>
+              <div class="q-sub">720p @ 30fps</div>
+            </button>
+          </div>
+        </div>
+
+        <!-- Audio Settings -->
+        <div class="settings-group toggle-row">
+          <div class="toggle-info">
+            <label for="shareAudioToggle" class="toggle-title">Stream System Audio</label>
+            <p class="toggle-desc">Transmit laptop speaker sound directly to phone/headphones</p>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="shareAudioToggle" checked>
+            <span class="slider round"></span>
+          </label>
+        </div>
+
+        <!-- Live Preview Box -->
+        <div class="preview-box" id="previewContainer">
+          <div class="preview-overlay-empty" id="previewEmpty">
+            <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5">
+              <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+              <line x1="8" y1="21" x2="16" y2="21"></line>
+              <line x1="12" y1="17" x2="12" y2="21"></line>
+            </svg>
+            <p>Live stream preview will appear here when active</p>
+          </div>
+          <div class="video-wrapper" id="videoWrapper" style="display: none;">
+            <video id="hostPreviewVideo" autoplay playsinline muted></video>
+            <canvas id="laserCanvas"></canvas>
+            <div class="live-tag">● LIVE</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Right Column: Mobile Connect & Telemetry -->
+      <section class="panel connect-panel">
+        <div class="panel-header">
+          <h2>Connect Mobile Device</h2>
+          <span class="badge badge-success">Wi-Fi LAN</span>
+        </div>
+
+        <!-- QR Code Card -->
+        <div class="qr-card">
+          <div class="qr-frame">
+            <img id="qrImage" src="" alt="Scan to connect Android Phone" />
+            <div class="qr-loading" id="qrLoading">
+              <div class="spinner"></div>
+              <span>Generating QR...</span>
+            </div>
+          </div>
+          <div class="qr-instructions">
+            <div class="instruction-step">
+              <span class="step-num">1</span>
+              <span>Connect phone to the same <strong>Wi-Fi</strong></span>
+            </div>
+            <div class="instruction-step">
+              <span class="step-num">2</span>
+              <span>Open Camera or Browser & <strong>Scan QR</strong></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Direct URL Copier -->
+        <div class="url-copier">
+          <label class="section-label">Or open this link on your phone:</label>
+          <div class="copy-input-group">
+            <input type="text" id="viewerUrlInput" readonly value="Loading..." />
+            <button id="copyUrlBtn" class="btn btn-secondary" title="Copy to clipboard">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+              </svg>
+              <span>Copy</span>
+            </button>
+            <a id="openViewerTabBtn" href="#" target="_blank" class="btn btn-icon-only" title="Open Viewer in new tab">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                <polyline points="15 3 21 3 21 9"></polyline>
+                <line x1="10" y1="14" x2="21" y2="3"></line>
+              </svg>
+            </a>
+          </div>
+        </div>
+
+        <!-- Network Interface Dropdown (if multiple) -->
+        <div class="network-select-group" id="networkSelectGroup" style="display: none;">
+          <label for="networkIpSelect">Select Active Network Interface:</label>
+          <select id="networkIpSelect" class="form-select"></select>
+        </div>
+
+        <!-- Connected Viewers Section -->
+        <div class="viewers-section">
+          <div class="section-sub-header">
+            <h3>Connected Devices</h3>
+            <span class="viewer-count-pill" id="viewerCountPill">0 Active</span>
+          </div>
+          <div class="viewers-list" id="viewersList">
+            <div class="empty-viewers" id="emptyViewersMsg">
+              <p>No phone connected yet. Scan the QR code above to start mirroring!</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Live Telemetry Stream Stats -->
+        <div class="telemetry-bar">
+          <div class="stat-item">
+            <span class="stat-label">Resolution</span>
+            <span class="stat-value" id="statResolution">--</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">Frame Rate</span>
+            <span class="stat-value" id="statFps">-- FPS</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">Latency</span>
+            <span class="stat-value" id="statLatency">&lt; 15 ms</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">Transport</span>
+            <span class="stat-value highlight">WebRTC P2P</span>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Footer -->
+    <footer class="app-footer">
+      <p>AirCast PC • Ultra Low-Latency Screen Mirroring powered by WebRTC & WebSockets</p>
+    </footer>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div id="toastContainer" class="toast-container"></div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/js/host.js"></script>
+</body>
+</html>
