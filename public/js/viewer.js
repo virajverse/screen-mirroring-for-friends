@@ -216,8 +216,28 @@
     }
   }
 
+  // Unmute Handler
+  function handleUnmute(e) {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    remoteVideo.muted = false;
+    isMuted = false;
+    audioOnIcon.style.display = 'block';
+    audioOffIcon.style.display = 'none';
+    audioUnmuteOverlay.style.display = 'none';
+    remoteVideo.play().then(() => {
+      showToast('🔊 Laptop Audio Enabled');
+    }).catch(err => console.log('Audio error:', err));
+  }
+
+  unmuteAudioBtn.addEventListener('click', handleUnmute);
+  unmuteAudioBtn.addEventListener('touchend', handleUnmute);
+
   // Audio Toggle
-  audioToggleBtn.addEventListener('click', () => {
+  audioToggleBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
     isMuted = !isMuted;
     remoteVideo.muted = isMuted;
     if (isMuted) {
@@ -227,22 +247,14 @@
     } else {
       audioOnIcon.style.display = 'block';
       audioOffIcon.style.display = 'none';
+      remoteVideo.play();
       showToast('Audio Unmuted');
     }
   });
 
-  unmuteAudioBtn.addEventListener('click', () => {
-    remoteVideo.muted = false;
-    remoteVideo.play().then(() => {
-      audioUnmuteOverlay.style.display = 'none';
-      audioOnIcon.style.display = 'block';
-      audioOffIcon.style.display = 'none';
-      showToast('🔊 Audio Enabled');
-    }).catch(err => console.log('Audio play error:', err));
-  });
-
   // Laser Pointer Mode Toggle
-  laserModeBtn.addEventListener('click', () => {
+  laserModeBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
     isLaserMode = !isLaserMode;
     if (isLaserMode) {
       laserModeBtn.classList.add('laser-active');
@@ -254,7 +266,8 @@
   });
 
   // Snapshot / Screenshot Tool
-  snapshotBtn.addEventListener('click', () => {
+  snapshotBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
     if (!remoteVideo.videoWidth) {
       showToast('No active video stream');
       return;
@@ -273,14 +286,12 @@
   });
 
   // Telemetry HUD Toggle
-  toggleHudBtn.addEventListener('click', () => {
+  toggleHudBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
     const isVisible = telemetryHud.style.display !== 'none';
     telemetryHud.style.display = isVisible ? 'none' : 'flex';
     toggleHudBtn.classList.toggle('active', !isVisible);
   });
-
-  // Gesture Controls: Pinch-to-Zoom & Drag Pan
-  const stage = document.getElementById('viewerStage');
 
   function getDistance(t1, t2) {
     const dx = t1.clientX - t2.clientX;
@@ -320,7 +331,13 @@
     setTimeout(() => ripple.remove(), 400);
   }
 
+  // Touch Event Listeners on Stage
   stage.addEventListener('touchstart', (e) => {
+    // If user touched a button, dock, or banner, let normal click proceed
+    if (e.target.closest('button') || e.target.closest('.floating-dock') || e.target.closest('.viewer-header') || e.target.closest('#audioUnmuteOverlay')) {
+      return;
+    }
+
     if (e.touches.length === 2) {
       // 2 Finger Pinch Start
       isDragging = false;
@@ -342,9 +359,12 @@
   }, { passive: false });
 
   stage.addEventListener('touchmove', (e) => {
-    e.preventDefault();
-
+    if (e.target.closest('button') || e.target.closest('.floating-dock') || e.target.closest('.viewer-header')) {
+      return;
+    }
+    
     if (e.touches.length === 2) {
+      e.preventDefault();
       // 2 Finger Pinch Move
       const currentDist = getDistance(e.touches[0], e.touches[1]);
       if (startTouchDistance > 0) {
@@ -357,11 +377,14 @@
         updateTransform();
       }
     } else if (e.touches.length === 1) {
-      const touch = e.touches[0];
       if (isLaserMode) {
+        e.preventDefault();
+        const touch = e.touches[0];
         emitLaserPoint(touch.clientX, touch.clientY);
       } else if (scale > 1 && isDragging) {
+        e.preventDefault();
         // Pan when zoomed in
+        const touch = e.touches[0];
         const dx = touch.clientX - touchStartX;
         const dy = touch.clientY - touchStartY;
         panX = startPanX + dx;
@@ -372,6 +395,10 @@
   }, { passive: false });
 
   stage.addEventListener('touchend', (e) => {
+    if (e.target.closest('button') || e.target.closest('.floating-dock') || e.target.closest('.viewer-header')) {
+      return;
+    }
+
     if (e.touches.length === 0) {
       isDragging = false;
 
@@ -391,8 +418,7 @@
       } else {
         lastTapTime = currentTime;
         // Single tap outside controls toggles UI
-        if (!isLaserMode && !e.target.closest('.floating-dock') && !e.target.closest('.viewer-header')) {
-          // Delay single tap slightly to not conflict with double tap
+        if (!isLaserMode) {
           setTimeout(() => {
             if (Date.now() - lastTapTime >= 280) {
               toggleControls();
