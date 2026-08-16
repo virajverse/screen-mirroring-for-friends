@@ -1,6 +1,8 @@
 // Android & Mobile WebRTC Viewer Controller
 (function () {
-  const socket = io();
+  const socket = io(window.location.origin, {
+    transports: ['websocket', 'polling']
+  });
   const urlParams = new URLSearchParams(window.location.search);
   const roomId = urlParams.get('room') || 'default';
 

@@ -159,7 +159,13 @@
   <!-- Toast Notification Container -->
   <div id="toastContainer" class="toast-container"></div>
 
-  <script src="/socket.io/socket.io.js"></script>
+  <!-- Real-time Socket.IO Connection -->
+  <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
+  <script>
+    if (typeof io === 'undefined') {
+      document.write('<script src="/socket.io/socket.io.js"><\/script>');
+    }
+  </script>
   <script src="/js/viewer.js"></script>
 </body>
 </html>
