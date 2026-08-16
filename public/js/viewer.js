@@ -43,6 +43,8 @@
   let remoteStream = null;
   let hostSocketId = null;
   let isHostStreaming = false;
+  let isRemoteDescriptionSet = false;
+  let pendingIceCandidates = [];
 
   // Zoom & Pan Gesture State
   let scale = 1;
@@ -59,7 +61,7 @@
 
   // Features State
   let isLaserMode = false;
-  let isMuted = false;
+  let isMuted = true;
   let isControlsHidden = false;
   let wakeLockSentinel = null;
   let isFitCover = false;
@@ -67,12 +69,17 @@
   let lastDecodedFrames = 0;
   let lastStatsTime = Date.now();
 
-  // WebRTC ICE Configuration
+  // Multi-STUN Server configuration for robust Internet & LAN WebRTC
   const rtcConfig = {
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'stun:stun1.l.google.com:19302' }
-    ]
+      { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun2.l.google.com:19302' },
+      { urls: 'stun:stun3.l.google.com:19302' },
+      { urls: 'stun:stun4.l.google.com:19302' },
+      { urls: 'stun:global.stun.twilio.com:3478' }
+    ],
+    iceCandidatePoolSize: 10
   };
 
   // Helper: Toast Message
@@ -399,29 +406,58 @@
   // WebRTC Setup
   function initWebRTC() {
     if (peerConnection) {
-      peerConnection.close();
+      try {
+        peerConnection.close();
+      } catch (e) {}
     }
 
+    isRemoteDescriptionSet = false;
+    pendingIceCandidates = [];
     peerConnection = new RTCPeerConnection(rtcConfig);
+
+    // Explicitly add transceivers for receiving video and audio
+    try {
+      peerConnection.addTransceiver('video', { direction: 'recvonly' });
+      peerConnection.addTransceiver('audio', { direction: 'recvonly' });
+    } catch (e) {
+      console.log('[Viewer] addTransceiver fallback:', e);
+    }
 
     peerConnection.ontrack = (event) => {
       console.log('[Viewer] Track received:', event.track.kind);
-      if (remoteVideo.srcObject !== event.streams[0]) {
+      
+      if (event.streams && event.streams[0]) {
         remoteStream = event.streams[0];
         remoteVideo.srcObject = remoteStream;
+      } else {
+        if (!remoteStream) {
+          remoteStream = new MediaStream();
+          remoteVideo.srcObject = remoteStream;
+        }
+        remoteStream.addTrack(event.track);
+      }
 
-        // Auto-play stream
-        remoteVideo.play().then(() => {
-          waitingState.style.display = 'none';
-          liveDot.classList.add('active');
-          streamStateTag.textContent = 'LIVE';
-          streamStateTag.classList.add('live');
+      // Hide waiting state & activate live indicator
+      waitingState.style.display = 'none';
+      liveDot.classList.add('active');
+      streamStateTag.textContent = 'LIVE';
+      streamStateTag.classList.add('live');
+
+      // Play video (always muted initially for 100% Android autoplay compliance)
+      remoteVideo.muted = true;
+      const playPromise = remoteVideo.play();
+      if (playPromise !== undefined) {
+        playPromise.then(() => {
           requestWakeLock();
           startTelemetryStats();
-        }).catch((err) => {
-          console.log('[Autoplay Blocked] Prompting user to unmute', err);
-          waitingState.style.display = 'none';
+          // Prompt user to tap if they want audio
           audioUnmuteOverlay.style.display = 'block';
+        }).catch((err) => {
+          console.log('[Autoplay Error]', err);
+          remoteVideo.muted = true;
+          remoteVideo.play().then(() => {
+            audioUnmuteOverlay.style.display = 'block';
+          });
         });
       }
     };
@@ -437,9 +473,14 @@
 
     peerConnection.onconnectionstatechange = () => {
       console.log('[Viewer] PeerConnection State:', peerConnection.connectionState);
-      if (peerConnection.connectionState === 'disconnected' || peerConnection.connectionState === 'failed') {
+      if (peerConnection.connectionState === 'connected') {
+        liveDot.classList.add('active');
+        streamStateTag.textContent = 'LIVE';
+        streamStateTag.classList.add('live');
+        waitingState.style.display = 'none';
+      } else if (peerConnection.connectionState === 'disconnected' || peerConnection.connectionState === 'failed') {
         liveDot.classList.remove('active');
-        streamStateTag.textContent = 'Disconnected';
+        streamStateTag.textContent = 'Reconnecting';
         streamStateTag.classList.remove('live');
       }
     };
@@ -485,18 +526,24 @@
 
   // Socket.IO Handlers
   socket.on('connect', () => {
-    console.log('[Viewer] Connected to server, ID:', socket.id);
+    console.log('[Viewer] Connected to signaling server, ID:', socket.id);
     const deviceInfo = getDeviceInfo();
     socket.emit('viewer-join', { roomId, deviceInfo });
   });
 
-  socket.on('host-status', ({ isHostOnline }) => {
+  socket.on('host-status', ({ isHostOnline, isStreaming }) => {
+    console.log('[Viewer] Host status:', { isHostOnline, isStreaming });
     if (isHostOnline) {
-      waitingTitle.textContent = 'Host Connected';
-      waitingDesc.textContent = 'Waiting for laptop to share screen...';
+      if (isStreaming) {
+        waitingTitle.textContent = 'Host is Live';
+        waitingDesc.textContent = 'Connecting to 60 FPS stream...';
+      } else {
+        waitingTitle.textContent = 'Host Connected';
+        waitingDesc.textContent = 'Waiting for laptop to click "Start Screen Mirroring"...';
+      }
     } else {
       waitingTitle.textContent = 'Host Offline';
-      waitingDesc.textContent = 'Open the AirCast dashboard on your laptop.';
+      waitingDesc.textContent = 'Please open the AirCast dashboard on your laptop.';
     }
   });
 
@@ -509,6 +556,20 @@
 
     try {
       await peerConnection.setRemoteDescription(new RTCSessionDescription(sdp));
+      isRemoteDescriptionSet = true;
+      console.log('[Viewer] Remote description set successfully');
+
+      // Drain all queued ICE candidates
+      while (pendingIceCandidates.length > 0) {
+        const cand = pendingIceCandidates.shift();
+        try {
+          await peerConnection.addIceCandidate(new RTCIceCandidate(cand));
+          console.log('[Viewer] Drained queued ICE candidate');
+        } catch (e) {
+          console.error('[Viewer] Error adding queued ICE candidate:', e);
+        }
+      }
+
       const answer = await peerConnection.createAnswer();
       await peerConnection.setLocalDescription(answer);
 
@@ -524,12 +585,16 @@
 
   // Handle ICE Candidate from Host
   socket.on('ice-candidate', async ({ sender, candidate }) => {
-    if (peerConnection && candidate) {
+    if (!candidate) return;
+    if (peerConnection && isRemoteDescriptionSet) {
       try {
         await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
       } catch (err) {
         console.error('[Viewer] Error adding ICE candidate:', err);
       }
+    } else {
+      pendingIceCandidates.push(candidate);
+      console.log('[Viewer] Queued ICE candidate before remote description');
     }
   });
 

@@ -37,16 +37,22 @@
   let isStreaming = false;
   let selectedQuality = '1080p60';
   const peerConnections = new Map(); // viewerId -> RTCPeerConnection
+  const iceCandidateQueues = new Map(); // viewerId -> [candidate]
   const connectedViewers = new Map(); // viewerId -> info
   let laserCtx = null;
   const laserPointers = new Map(); // viewerId -> { x, y, timestamp, color }
 
-  // ICE Server configuration (LAN direct + Google STUN fallback)
+  // Multi-STUN Server configuration for robust Internet & LAN WebRTC
   const rtcConfig = {
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'stun:stun1.l.google.com:19302' }
-    ]
+      { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun2.l.google.com:19302' },
+      { urls: 'stun:stun3.l.google.com:19302' },
+      { urls: 'stun:stun4.l.google.com:19302' },
+      { urls: 'stun:global.stun.twilio.com:3478' }
+    ],
+    iceCandidatePoolSize: 10
   };
 
   // Quality Profiles
@@ -292,9 +298,12 @@
     if (!localStream) return;
 
     if (peerConnections.has(viewerId)) {
-      peerConnections.get(viewerId).close();
+      try {
+        peerConnections.get(viewerId).close();
+      } catch (e) {}
       peerConnections.delete(viewerId);
     }
+    iceCandidateQueues.set(viewerId, []);
 
     const pc = new RTCPeerConnection(rtcConfig);
     peerConnections.set(viewerId, pc);
@@ -316,9 +325,16 @@
 
     pc.onconnectionstatechange = () => {
       console.log(`[Viewer ${viewerId}] Connection state:`, pc.connectionState);
-      if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
-        pc.close();
-        peerConnections.delete(viewerId);
+      if (pc.connectionState === 'failed') {
+        console.log(`[Viewer ${viewerId}] Retrying connection via ICE restart`);
+        pc.restartIce && pc.restartIce();
+      } else if (pc.connectionState === 'disconnected') {
+        setTimeout(() => {
+          if (pc.connectionState === 'disconnected') {
+            pc.close();
+            peerConnections.delete(viewerId);
+          }
+        }, 3000);
       }
     };
 
@@ -364,7 +380,7 @@
             <span class="viewer-dot"></span>
             <div>
               <div class="viewer-device-name">${deviceName}</div>
-              <div class="viewer-meta">${device.browser || 'Chrome'} • LAN Connected</div>
+              <div class="viewer-meta">${device.browser || 'Chrome'} • Live WebRTC</div>
             </div>
           </div>
           <span class="badge badge-success">Live</span>
@@ -382,6 +398,15 @@
 
   socket.on('host-ready', (data) => {
     console.log('[Host Ready] Room registered:', data);
+    if (data.viewers && data.viewers.length > 0) {
+      data.viewers.forEach(v => {
+        connectedViewers.set(v.viewerId, { deviceInfo: v.deviceInfo, joinedAt: Date.now() });
+        if (isStreaming && localStream) {
+          createPeerConnectionForViewer(v.viewerId);
+        }
+      });
+      updateViewersUI();
+    }
   });
 
   // When a new mobile viewer connects
@@ -389,7 +414,7 @@
     console.log(`[Viewer Connected] ID: ${viewerId}`, deviceInfo);
     connectedViewers.set(viewerId, { deviceInfo, joinedAt: Date.now() });
     updateViewersUI();
-    showToast(`📱 Android device connected!`);
+    showToast(`📱 Phone connected!`);
 
     if (isStreaming && localStream) {
       createPeerConnectionForViewer(viewerId);
@@ -400,8 +425,11 @@
   socket.on('viewer-disconnected', ({ viewerId }) => {
     console.log(`[Viewer Disconnected] ID: ${viewerId}`);
     connectedViewers.delete(viewerId);
+    iceCandidateQueues.delete(viewerId);
     if (peerConnections.has(viewerId)) {
-      peerConnections.get(viewerId).close();
+      try {
+        peerConnections.get(viewerId).close();
+      } catch (e) {}
       peerConnections.delete(viewerId);
     }
     updateViewersUI();
@@ -414,6 +442,17 @@
       try {
         await pc.setRemoteDescription(new RTCSessionDescription(sdp));
         console.log(`[Host] Set remote description for viewer ${viewerId}`);
+
+        // Drain queued ICE candidates from viewer
+        const queue = iceCandidateQueues.get(viewerId) || [];
+        for (const candidate of queue) {
+          try {
+            await pc.addIceCandidate(new RTCIceCandidate(candidate));
+          } catch (e) {
+            console.error('[Host] Error draining queued ICE candidate:', e);
+          }
+        }
+        iceCandidateQueues.set(viewerId, []);
       } catch (err) {
         console.error(`Error setting remote description for ${viewerId}:`, err);
       }
@@ -422,13 +461,19 @@
 
   // Handle ICE Candidate from Viewer
   socket.on('ice-candidate', async ({ sender, candidate }) => {
+    if (!candidate) return;
     const pc = peerConnections.get(sender);
-    if (pc && candidate) {
+    if (pc && pc.remoteDescription && pc.remoteDescription.type) {
       try {
         await pc.addIceCandidate(new RTCIceCandidate(candidate));
       } catch (err) {
-        console.error('Error adding received ICE candidate:', err);
+        console.error('Error adding received ICE candidate on host:', err);
       }
+    } else {
+      if (!iceCandidateQueues.has(sender)) {
+        iceCandidateQueues.set(sender, []);
+      }
+      iceCandidateQueues.get(sender).push(candidate);
     }
   });
 

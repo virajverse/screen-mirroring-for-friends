@@ -115,18 +115,35 @@ io.on('connection', (socket) => {
     if (!rooms.has(roomId)) {
       rooms.set(roomId, {
         hostSocketId: socket.id,
+        isStreaming: false,
         viewers: new Map()
       });
     } else {
-      rooms.get(roomId).hostSocketId = socket.id;
+      const r = rooms.get(roomId);
+      r.hostSocketId = socket.id;
     }
 
     const roomInfo = rooms.get(roomId);
+    
+    // Convert existing viewers to array for host
+    const existingViewers = [];
+    roomInfo.viewers.forEach((v, id) => {
+      existingViewers.push({ viewerId: id, deviceInfo: v.deviceInfo });
+    });
+
     socket.emit('host-ready', {
       roomId,
-      viewerCount: roomInfo.viewers.size
+      viewerCount: roomInfo.viewers.size,
+      viewers: existingViewers
     });
-    console.log(`[Host Registered] Room: ${roomId}, Host Socket: ${socket.id}`);
+
+    // Notify all viewers in room that host is online
+    socket.to(roomId).emit('host-status', { 
+      isHostOnline: true, 
+      isStreaming: roomInfo.isStreaming 
+    });
+
+    console.log(`[Host Registered] Room: ${roomId}, Host Socket: ${socket.id}, Existing Viewers: ${existingViewers.length}`);
   });
 
   // Viewer joins room
@@ -138,6 +155,7 @@ io.on('connection', (socket) => {
     if (!rooms.has(roomId)) {
       rooms.set(roomId, {
         hostSocketId: null,
+        isStreaming: false,
         viewers: new Map()
       });
     }
@@ -148,20 +166,24 @@ io.on('connection', (socket) => {
       deviceInfo
     });
 
+    const isHostOnline = !!roomInfo.hostSocketId;
+
+    // Send immediate status to the viewer
+    socket.emit('host-status', {
+      isHostOnline,
+      isStreaming: roomInfo.isStreaming
+    });
+
     // Notify the host that a new viewer has joined
-    if (roomInfo.hostSocketId) {
+    if (isHostOnline) {
       io.to(roomInfo.hostSocketId).emit('viewer-connected', {
         viewerId: socket.id,
         deviceInfo,
         viewerCount: roomInfo.viewers.size
       });
-      // Inform the viewer that host is online
-      socket.emit('host-status', { isHostOnline: true });
-    } else {
-      socket.emit('host-status', { isHostOnline: false });
     }
 
-    console.log(`[Viewer Connected] Room: ${roomId}, Viewer: ${socket.id}, Total Viewers: ${roomInfo.viewers.size}`);
+    console.log(`[Viewer Connected] Room: ${roomId}, Viewer: ${socket.id}, Host Online: ${isHostOnline}`);
   });
 
   // WebRTC Signaling: Offer from Host to a specific Viewer
@@ -182,10 +204,12 @@ io.on('connection', (socket) => {
 
   // WebRTC Signaling: ICE Candidate exchange
   socket.on('ice-candidate', ({ target, candidate }) => {
-    io.to(target).emit('ice-candidate', {
-      sender: socket.id,
-      candidate
-    });
+    if (target && candidate) {
+      io.to(target).emit('ice-candidate', {
+        sender: socket.id,
+        candidate
+      });
+    }
   });
 
   // Laser Pointer event from Viewer to Host
@@ -203,8 +227,14 @@ io.on('connection', (socket) => {
 
   // Stream state update (Host started / stopped stream)
   socket.on('stream-state', (data) => {
-    if (currentRoom) {
+    if (currentRoom && rooms.has(currentRoom)) {
+      const r = rooms.get(currentRoom);
+      r.isStreaming = !!data.isStreaming;
       socket.to(currentRoom).emit('stream-state', data);
+      socket.to(currentRoom).emit('host-status', {
+        isHostOnline: true,
+        isStreaming: r.isStreaming
+      });
     }
   });
 
@@ -215,7 +245,8 @@ io.on('connection', (socket) => {
 
       if (userRole === 'host') {
         roomInfo.hostSocketId = null;
-        io.to(currentRoom).emit('host-status', { isHostOnline: false });
+        roomInfo.isStreaming = false;
+        io.to(currentRoom).emit('host-status', { isHostOnline: false, isStreaming: false });
         console.log(`[Host Disconnected] Room: ${currentRoom}`);
       } else if (userRole === 'viewer') {
         roomInfo.viewers.delete(socket.id);
