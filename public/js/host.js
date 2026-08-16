@@ -39,8 +39,6 @@
   const peerConnections = new Map(); // viewerId -> RTCPeerConnection
   const iceCandidateQueues = new Map(); // viewerId -> [candidate]
   const connectedViewers = new Map(); // viewerId -> info
-  let laserCtx = null;
-  const laserPointers = new Map(); // viewerId -> { x, y, timestamp, color }
 
   // Multi-STUN Server configuration for robust Internet & LAN WebRTC
   const rtcConfig = {
@@ -62,57 +60,6 @@
     '720p60': { width: 1280, height: 720, frameRate: 60 },
     'low': { width: 1280, height: 720, frameRate: 30 }
   };
-
-  // Setup Laser Canvas
-  function initLaserCanvas() {
-    laserCtx = laserCanvas.getContext('2d');
-    function resizeCanvas() {
-      if (videoWrapper.offsetWidth && videoWrapper.offsetHeight) {
-        laserCanvas.width = videoWrapper.offsetWidth;
-        laserCanvas.height = videoWrapper.offsetHeight;
-      }
-    }
-    window.addEventListener('resize', resizeCanvas);
-    resizeCanvas();
-
-    // Laser Animation Loop
-    function renderLaser() {
-      if (!laserCtx) return;
-      laserCtx.clearRect(0, 0, laserCanvas.width, laserCanvas.height);
-      const now = Date.now();
-
-      laserPointers.forEach((point, id) => {
-        const age = now - point.timestamp;
-        if (age > 2000) {
-          laserPointers.delete(id);
-          return;
-        }
-
-        const opacity = Math.max(0, 1 - age / 2000);
-        const px = point.x * laserCanvas.width;
-        const py = point.y * laserCanvas.height;
-
-        // Draw glowing laser dot
-        laserCtx.save();
-        laserCtx.beginPath();
-        laserCtx.arc(px, py, 8, 0, Math.PI * 2);
-        laserCtx.fillStyle = `rgba(239, 68, 68, ${opacity})`;
-        laserCtx.shadowColor = '#ef4444';
-        laserCtx.shadowBlur = 15;
-        laserCtx.fill();
-
-        // Inner bright core
-        laserCtx.beginPath();
-        laserCtx.arc(px, py, 3, 0, Math.PI * 2);
-        laserCtx.fillStyle = `rgba(255, 255, 255, ${opacity})`;
-        laserCtx.fill();
-        laserCtx.restore();
-      });
-
-      requestAnimationFrame(renderLaser);
-    }
-    renderLaser();
-  }
 
   // Show Toast
   function showToast(message) {

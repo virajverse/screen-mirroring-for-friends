@@ -252,19 +252,6 @@
     }
   });
 
-  // Laser Pointer Mode Toggle
-  laserModeBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    isLaserMode = !isLaserMode;
-    if (isLaserMode) {
-      laserModeBtn.classList.add('laser-active');
-      showToast('🔴 Laser Pointer Active (Tap screen to point)');
-    } else {
-      laserModeBtn.classList.remove('laser-active');
-      showToast('Laser Pointer Off');
-    }
-  });
-
   // Snapshot / Screenshot Tool
   snapshotBtn.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -299,39 +286,7 @@
     return Math.sqrt(dx * dx + dy * dy);
   }
 
-  function emitLaserPoint(clientX, clientY) {
-    const rect = remoteVideo.getBoundingClientRect();
-    if (clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom) {
-      const normX = (clientX - rect.left) / rect.width;
-      const normY = (clientY - rect.top) / rect.height;
-      socket.emit('laser-pointer', { x: normX, y: normY });
-      createTouchRipple(clientX, clientY);
-    }
-  }
-
-  function createTouchRipple(x, y) {
-    const ripple = document.createElement('div');
-    ripple.style.position = 'fixed';
-    ripple.style.left = `${x - 15}px`;
-    ripple.style.top = `${y - 15}px`;
-    ripple.style.width = '30px';
-    ripple.style.height = '30px';
-    ripple.style.borderRadius = '50%';
-    ripple.style.background = 'rgba(255, 42, 95, 0.6)';
-    ripple.style.boxShadow = '0 0 15px #ff2a5f';
-    ripple.style.pointerEvents = 'none';
-    ripple.style.zIndex = '999';
-    ripple.style.transition = 'all 0.4s ease-out';
-    document.body.appendChild(ripple);
-
-    requestAnimationFrame(() => {
-      ripple.style.transform = 'scale(2.5)';
-      ripple.style.opacity = '0';
-    });
-    setTimeout(() => ripple.remove(), 400);
-  }
-
-  // Touch Event Listeners on Stage
+  // Touch Event Listeners on Stage (Purely local pinch-zoom & pan on phone)
   stage.addEventListener('touchstart', (e) => {
     // If user touched a button, dock, or banner, let normal click proceed
     if (e.target.closest('button') || e.target.closest('.floating-dock') || e.target.closest('.viewer-header') || e.target.closest('#audioUnmuteOverlay')) {
@@ -350,11 +305,6 @@
       startPanX = panX;
       startPanY = panY;
       isDragging = true;
-
-      // Laser Pointer trigger
-      if (isLaserMode) {
-        emitLaserPoint(touch.clientX, touch.clientY);
-      }
     }
   }, { passive: false });
 
@@ -377,11 +327,7 @@
         updateTransform();
       }
     } else if (e.touches.length === 1) {
-      if (isLaserMode) {
-        e.preventDefault();
-        const touch = e.touches[0];
-        emitLaserPoint(touch.clientX, touch.clientY);
-      } else if (scale > 1 && isDragging) {
+      if (scale > 1 && isDragging) {
         e.preventDefault();
         // Pan when zoomed in
         const touch = e.touches[0];
@@ -418,13 +364,11 @@
       } else {
         lastTapTime = currentTime;
         // Single tap outside controls toggles UI
-        if (!isLaserMode) {
-          setTimeout(() => {
-            if (Date.now() - lastTapTime >= 280) {
-              toggleControls();
-            }
-          }, 290);
-        }
+        setTimeout(() => {
+          if (Date.now() - lastTapTime >= 280) {
+            toggleControls();
+          }
+        }, 290);
       }
     }
   });
